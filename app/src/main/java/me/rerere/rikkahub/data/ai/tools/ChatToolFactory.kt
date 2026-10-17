@@ -64,6 +64,13 @@ class ChatToolFactory(
             addAll(createConversationTools(conversationRepository, assistant.id))
         }
         addAll(createWorkspaceToolsIfReady(assistant.workspaceId?.toString(), workspaceCwd))
+        if (WRITING_SKILL_NAME in assistant.enabledSkills) {
+            val workspaceId = assistant.workspaceId?.toString()
+            val workspace = workspaceId?.let { workspaceRepository.getById(it) }
+            if (workspace != null && workspace.shellStatus == WorkspaceShellStatus.READY.name) {
+                addAll(createWritingTools(workspace.id, workspaceRepository, skillManager, workspace.toolApprovalOverrides()))
+            }
+        }
         if (assistant.enabledSkills.isNotEmpty()) {
             addAll(
                 createSkillTools(
