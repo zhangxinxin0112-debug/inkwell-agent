@@ -1,7 +1,7 @@
 package me.rerere.rikkahub.utils
 
-import android.app.DownloadManager
 import android.content.Context
+import android.app.DownloadManager
 import android.os.Environment
 import android.widget.Toast
 import androidx.core.net.toUri
@@ -21,7 +21,7 @@ import me.rerere.rikkahub.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-private const val API_URL = "https://updates.rikka-ai.com/"
+private const val API_URL = "https://api.github.com/repos/zhangxinxin0112-debug/inkwell-agent/releases/latest"
 
 class UpdateChecker(
     private val client: OkHttpClient,
@@ -44,17 +44,16 @@ class UpdateChecker(
                         Request.Builder()
                             .url(API_URL)
                             .get()
-                            .addHeader(
-                                "User-Agent",
-                                "RikkaHub ${BuildConfig.VERSION_NAME} #${BuildConfig.VERSION_CODE}"
-                            )
+                            .addHeader("Accept", "application/vnd.github+json")
+                            .addHeader("User-Agent", "inkwell ${BuildConfig.VERSION_NAME}")
                             .build()
                     ).await()
-                    if (response.isSuccessful) {
-                        json.decodeFromString<UpdateInfo>(response.body.string())
-                    } else {
-                        throw Exception("Failed to fetch update info")
+                    if (!response.isSuccessful) {
+                        // A fork release feed may legitimately have no release yet; stay quiet.
+                        throw SilentUpdateException()
                     }
+                    val release = json.decodeFromString<ForkRelease>(response.body.string())
+                    toUpdateInfo(release)
                 } catch (e: Exception) {
                     throw Exception("Failed to fetch update info", e)
                 }
@@ -193,3 +192,41 @@ private data class ParsedVersion(
 // 扩展操作符函数，使比较更直观
 operator fun String.compareTo(other: Version): Int = Version(this).compareTo(other)
 operator fun Version.compareTo(other: String): Int = this.compareTo(Version(other))
+
+/** Shape of a GitHub release payload we care about. */
+@Serializable
+private data class ForkRelease(
+    val tag_name: String,
+    val published_at: String = "",
+    val body: String = "",
+    val prerelease: Boolean = false,
+    val draft: Boolean = false,
+    val assets: List<ForkAsset> = emptyList(),
+)
+
+@Serializable
+private data class ForkAsset(
+    val name: String,
+    val browser_download_url: String,
+    val size: Long = 0,
+)
+
+/** Missing release or no APK means "nothing to offer", not an error worth showing. */
+private class SilentUpdateException : Exception()
+
+private fun toUpdateInfo(release: ForkRelease): UpdateInfo {
+    val apks = release.assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
+    val downloads = apks.map{
+        UpdateDownload(
+            name = it.name,
+            url = it.browser_download_url,
+            size = if (it.size > 0) String.format("%.1f MB", it.size / 1024.0 / 1024.0) else "",
+        )
+    }
+    return UpdateInfo(
+        version = release.tag_name.removePrefix("v"),
+        publishedAt = release.published_at,
+        changelog = release.body,
+        downloads = downloads,
+    )
+}

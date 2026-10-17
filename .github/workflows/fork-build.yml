@@ -103,9 +103,16 @@ jobs:
       - name: Build
         run: |
           chmod +x gradlew
-          ./gradlew testDebugUnitTest assembleDebug --console=plain
+          if [ -f app/app.key ]; then
+            ./gradlew testDebugUnitTest assembleRelease --console=plain
+          else
+            echo "::warning::No signing key; building debug APK instead."
+            ./gradlew testDebugUnitTest assembleDebug --console=plain
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rikkahub-writing-agent-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: inkwell-writing-agent
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/debug/*.apk
