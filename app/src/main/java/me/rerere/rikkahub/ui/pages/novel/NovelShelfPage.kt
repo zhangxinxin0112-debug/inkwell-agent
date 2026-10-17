@@ -2,6 +2,8 @@ package me.rerere.rikkahub.ui.pages.novel
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -20,9 +23,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +55,7 @@ fun NovelShelfPage(vm: NovelShelfVM = koinViewModel()) {
     val toaster = LocalToaster.current
     val novels by vm.novels.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    var pendingDelete by remember { mutableStateOf<NovelMeta?>(null) }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -93,20 +101,46 @@ fun NovelShelfPage(vm: NovelShelfVM = koinViewModel()) {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(novels, key = { it.id }) { novel ->
-                    NovelRow(novel) { navController.navigate(Screen.NovelReader(novel.id)) }
+                    NovelRow(
+                        novel = novel,
+                        onClick = { navController.navigate(Screen.NovelReader(novel.id)) },
+                        onLongClick = { pendingDelete = novel },
+                    )
                 }
             }
         }
     }
+
+    pendingDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除这本书？") },
+            text = { Text("《${target.title}》及其阅读进度会一并删除，无法恢复。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        vm.delete(target.id)
+                        pendingDelete = null
+                        toaster.show("已删除《${target.title}》")
+                    }
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            },
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun NovelRow(novel: NovelMeta, onClick: () -> Unit) {
+private fun NovelRow(novel: NovelMeta, onClick: () -> Unit, onLongClick: () -> Unit) {
     Surface(
-        onClick = onClick,
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
