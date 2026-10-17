@@ -73,6 +73,10 @@ fun NovelReaderPage(
     val chapters by vm.chapters.collectAsStateWithLifecycle()
     val body by vm.body.collectAsStateWithLifecycle()
     val reading by vm.reading.collectAsStateWithLifecycle()
+    val typeRevision by vm.typeRevision.collectAsStateWithLifecycle()
+    // 字号/行距改过之后重新取一次，触发正文排版重组。
+    val fontSize = remember(typeRevision) { vm.fontSize }
+    val lineHeight = remember(typeRevision) { vm.lineHeight }
 
     var showCatalog by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
@@ -152,7 +156,7 @@ fun NovelReaderPage(
                         text = buildAnnotatedString {
                             body.orEmpty().trim().split('\n').forEach { line ->
                                 if (line.isNotBlank()) {
-                                    withStyle(SpanStyle(fontSize = vm.fontSize.sp)) {
+                                    withStyle(SpanStyle(fontSize = fontSize.sp)) {
                                         append(line.trim())
                                     }
                                     append("\n\n")
@@ -160,7 +164,7 @@ fun NovelReaderPage(
                             }
                         },
                         style = MaterialTheme.typography.bodyLarge.copy(
-                            lineHeight = (vm.fontSize * vm.lineHeight).sp,
+                            lineHeight = (fontSize * lineHeight).sp,
                         ),
                         color = MaterialTheme.colorScheme.onSurface,
                     )
@@ -200,10 +204,10 @@ fun NovelReaderPage(
     if (showSettings) {
         ModalBottomSheet(onDismissRequest = { showSettings = false }, sheetState = sheetState) {
             TypeSettings(
-                fontSize = vm.fontSize,
-                lineHeight = vm.lineHeight,
-                onFontSize = vm::setFontSize,
-                onLineHeight = vm::setLineHeight,
+                fontSize = fontSize,
+                lineHeight = lineHeight,
+                onFontSize = vm::updateFontSize,
+                onLineHeight = vm::updateLineHeight,
             )
         }
     }

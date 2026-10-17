@@ -35,12 +35,11 @@ class NovelReaderVM(
     val body = MutableStateFlow<String?>(null)
     val reading = MutableStateFlow(ReadingState())
 
-    var fontSize: Int
-        get() = preferences.fontSize
-        private set(value) { preferences.fontSize = value }
-    var lineHeight: Float
-        get() = preferences.lineHeight
-        private set(value) { preferences.lineHeight = value }
+    val fontSize: Int get() = preferences.fontSize
+    val lineHeight: Float get() = preferences.lineHeight
+
+    /** 字号/行距改动后递增，供页面重组。 */
+    val typeRevision = MutableStateFlow(0)
 
     private var initialised = false
 
@@ -87,12 +86,14 @@ class NovelReaderVM(
         }
     }
 
-    fun setFontSize(value: Int) {
+    fun updateFontSize(value: Int) {
         preferences.fontSize = value.coerceIn(14, 26)
+        typeRevision.value++
     }
 
-    fun setLineHeight(value: Float) {
+    fun updateLineHeight(value: Float) {
         preferences.lineHeight = value.coerceIn(1.3f, 2.4f)
+        typeRevision.value++
     }
 }
 
