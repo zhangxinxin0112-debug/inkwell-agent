@@ -24,7 +24,6 @@ import me.rerere.rikkahub.ui.pages.novel.NovelShelfVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
-import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
