@@ -45,6 +45,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -53,8 +54,8 @@ import me.rerere.hugeicons.stroke.Book02
 import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.ListView
 import me.rerere.hugeicons.stroke.TextFont
-import me.rerere.rikkahub.ui.components.ui.BackButton
-import me.rerere.rikkahub.ui.components.ui.CustomColors
+import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import org.koin.androidx.compose.koinViewModel
 
@@ -183,7 +184,7 @@ fun NovelReaderPage(
     }
 
     if (showCatalog) {
-        ModalBottomSheet(onClickOutside = { showCatalog = false }, sheetState = sheetState) {
+        ModalBottomSheet(onDismissRequest = { showCatalog = false }, sheetState = sheetState) {
             NovelCatalog(
                 chapters = chapters,
                 current = reading.chapter,
@@ -196,7 +197,7 @@ fun NovelReaderPage(
         }
     }
     if (showSettings) {
-        ModalBottomSheet(onClickOutside = { showSettings = false }, sheetState = sheetState) {
+        ModalBottomSheet(onDismissRequest = { showSettings = false }, sheetState = sheetState) {
             TypeSettings(
                 fontSize = vm.fontSize,
                 lineHeight = vm.lineHeight,

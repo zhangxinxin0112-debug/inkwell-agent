@@ -107,6 +107,9 @@ class NovelRepository(
         }
     }
 
+    suspend fun getChapter(novelId: String, ordinal: Int): NovelChapterEntity? =
+        dao.getChapter(novelId, ordinal)
+
     suspend fun saveProgress(novelId: String, chapter: Int, offset: Float) = withContext(Dispatchers.IO) {
         dao.saveProgress(novelId, chapter, offset.coerceIn(0f, 1f), System.currentTimeMillis())
     }

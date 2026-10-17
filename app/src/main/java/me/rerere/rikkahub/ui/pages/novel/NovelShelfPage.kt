@@ -32,8 +32,8 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
 import me.rerere.rikkahub.data.db.entity.NovelEntity
-import me.rerere.rikkahub.ui.components.ui.BackButton
-import me.rerere.rikkahub.ui.components.ui.CustomColors
+import me.rerere.rikkahub.ui.components.nav.BackButton
+import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
 import me.rerere.rikkahub.Screen

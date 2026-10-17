@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.rerere.rikkahub.data.db.entity.NovelChapterEntity
@@ -97,4 +97,4 @@ class NovelReaderVM(
 }
 
 private suspend fun kotlinx.coroutines.flow.Flow<NovelEntity?>.firstOrNullValue(): NovelEntity? =
-    kotlinx.coroutines.flow.firstOrNull(this)
+    firstOrNull()
