@@ -12,6 +12,7 @@ CATEGORIES = ('chapter_outline','scene','character','relationship','world','time
               'power','history','faction','place','item','foreshadowing','craft')
 KINDS = ('explicit','reported','inference','analysis')
 UPDATES = ('new','supplement','change','reveal','conflict')
+CH_ORD_RE = re.compile(r'^第\s*[0-9零〇一二三四五六七八九十百千两]+\s*章')
 HEADING = re.compile(r'^\s*(?:第[零〇一二三四五六七八九十百千万两\d、]+[章节回卷].*|chapter\s+\d+.*)\s*$', re.I)
 
 class Store:
@@ -234,6 +235,129 @@ ORDER BY c.ordinal,r.id LIMIT ? OFFSET ?''',(source,cutoff,*(['%'+query+'%']*3),
         return {'entries':[dict(r, payload=json.loads(r['payload'])) for r in rows[:limit]],
                 'truncated':len(rows)>limit,'next_offset':offset+limit if len(rows)>limit else None,'warning':'Cutoff filters evidence discovery only; phase/knowledge applicability must still be checked. Conflicts and old revisions are intentionally retained.'}
 
+    def import_external(self, path, title=None):
+        """Import a zip exported by another tool. All of it is unverified external material."""
+        archive = Path(path)
+        if not archive.is_file():
+            raise ValueError('Zip not found')
+        if archive.stat().st_size > 300 * 1024 * 1024:
+            raise ValueError('Zip exceeds 300 MiB')
+        import zipfile
+        try:
+            z = zipfile.ZipFile(archive)
+        except zipfile.BadZipFile:
+            raise ValueError('Not a valid zip archive')
+        names = [n for n in z.namelist() if not n.endswith('/')]
+        if len(names) > 20000:
+            raise ValueError('Too many files in archive')
+        if sum(z.getinfo(n).file_size for n in names) > 500 * 1024 * 1024:
+            raise ValueError('Uncompressed content exceeds 500 MiB')
+        for n in names:
+            if n.startswith('/') or '..' in n.split('/'):
+                raise ValueError('Unsafe path in zip')
+        def read(name):
+            raw = z.read(name)
+            for enc in ('utf-8-sig', 'utf-8', 'gb18030'):
+                try:
+                    return raw.decode(enc)
+                except UnicodeDecodeError:
+                    continue
+            raise ValueError('Cannot decode text file')
+        root = names[0].split('/')[0] if names and '/' in names[0] else ''
+        title = clean(title or root or archive.stem, 'title', 200)
+        groups = {
+            'character': ('人物', '角色'),
+            'faction': ('势力', '阵营', '组织'),
+            'place': ('地点', '地理'),
+            'power': ('技能', '功法', '力量'),
+            'item': ('物品', '道具'),
+            'world': ('生物', '世界观', '设定'),
+            'history': ('历史', '背景'),
+            'timeline': ('时间', '年表'),
+            'relationship': ('关系',),
+        }
+        body_name = None
+        for n in names:
+            base = n.split('/')[-1]
+            if base in ('正文.txt', '正文.md', '全文.txt', '原文.txt') or base.startswith('正文'):
+                if body_name is None or z.getinfo(n).file_size > z.getinfo(body_name).file_size:
+                    body_name = n
+        if body_name is None and names:
+            body_name = max(names, key=lambda n: z.getinfo(n).file_size)
+        if body_name is None:
+            raise ValueError('No text content found in archive')
+        text = read(body_name)
+        staging = self.root / '.import'
+        staging.mkdir(parents=True, exist_ok=True)
+        tmp = staging / (hashlib.sha256(archive.name.encode()).hexdigest()[:16] + '.txt')
+        tmp.write_text(text, encoding='utf-8')
+        try:
+            info = self.import_source(tmp, title, 'utf-8')
+        finally:
+            tmp.unlink(missing_ok=True)
+        source_id = info['source']
+        chapter_id = self.db.execute(
+            'SELECT id FROM chapters WHERE source=? ORDER BY ordinal LIMIT 1', (source_id,)
+        ).fetchone()['id']
+        imported = 0
+        for n in names:
+            if n == body_name or not n.lower().endswith(('.txt', '.md')):
+                continue
+            parts = [x for x in n.split('/') if x]
+            if len(parts) > 1:
+                parts = parts[1:]
+            is_chapter = any(CH_ORD_RE.match(part) for part in parts)
+            category = 'chapter_outline' if is_chapter else 'world'
+            if not is_chapter:
+                for key, aliases in groups.items():
+                    if any(alias == part or alias in part for part in parts[:-1] for alias in aliases):
+                        category = key
+                        break
+            stem = Path(parts[-1]).stem.strip()
+            if is_chapter:
+                # The chapter label lives in the file name itself; keep it as the entity.
+                entity = stem
+            else:
+                entity = stem
+            if not entity or entity.startswith('.'):
+                continue
+            content = read(n).strip()
+            if not content:
+                continue
+            if len(content) > 6000:
+                content = content[:6000] + '\n... truncated at import'
+            topic = 'external dossier extract'
+            row = self.db.execute(
+                'SELECT id FROM entries WHERE source=? AND category=? AND entity=? AND topic=?',
+                (source_id, category, entity, topic)
+            ).fetchone()
+            if row:
+                eid = row['id']
+            else:
+                eid = self.db.execute(
+                    'INSERT INTO entries(source,category,entity,topic) VALUES(?,?,?,?)',
+                    (source_id, category, entity, topic)
+                ).lastrowid
+            payload = {
+                'category': category, 'kind': 'reported', 'update': 'new',
+                'entity': entity, 'topic': topic, 'claim': content,
+                'evidence': [], 'phase': 'unstated', 'links': [],
+                'verification': 'external_unverified', 'origin': 'external_zip',
+                'source_file': n,
+            }
+            raw = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+            with self.db:
+                self.db.execute(
+                    'INSERT OR IGNORE INTO revisions(entry,chapter,payload,digest) VALUES(?,?,?,?)',
+                    (eid, chapter_id, raw, hashlib.sha256(raw.encode()).hexdigest())
+                )
+            imported += 1
+        return {
+            'source': source_id, 'chapters': info['chapters'], 'lines': info['lines'],
+            'external_entries': imported, 'body_file': body_name,
+            'note': 'External material is reported/unverified and has no quotation anchors; do not present it as original canon until checked.',
+        }
+
     def browse(self, source, category=None, entity=None, offset=0, limit=20):
         if not self.db.execute("SELECT 1 FROM sources WHERE id=?",(source,)).fetchone():raise ValueError("Source not found")
         if category is not None:choice(category,CATEGORIES,"category")
@@ -309,6 +433,8 @@ def dispatch(store, action, data):
     if action=='audit':return store.audit(int(data['chapter']),data['checks'])
     if action=='finish':return store.finish(int(data['chapter']))
     if action=='search':return store.search(int(data['source']),data.get('query',''),int(data['through']) if data.get('through') is not None else None,int(data.get('limit',30)),int(data.get('offset',0)))
+    if action=='import_external':
+        return store.import_external(data['path'],data.get('title'))
     if action=='browse':
         return store.browse(int(data['source']),data.get('category'),data.get('entity'),data.get('offset',0),data.get('limit',20))
     if action=='export':return store.export(int(data['source']))
