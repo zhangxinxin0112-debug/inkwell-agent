@@ -55,6 +55,48 @@ jobs:
             echo "::warning::No signing secrets; producing an unsigned release APK for testing only."
           fi
 
+      - name: Firebase config
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          # Upstream expects a real Firebase config that we neither have nor need.
+          # A placeholder keeps the Google Services plugin satisfied; analytics and
+          # crash reporting simply stay inactive. Replace via secret if ever needed.
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s\n' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+          else
+            cat > app/google-services.json <<'JSON'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "inkwell-agent-local",
+              "storage_bucket": "inkwell-agent-local.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": { "package_name": "me.rerere.rikkahub" }
+                },
+                "oauth_client": [],
+                "api_key": [{ "current_key": "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }],
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+              },
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:1111111111111111111111",
+                  "android_client_info": { "package_name": "me.rerere.rikkahub.debug" }
+                },
+                "oauth_client": [],
+                "api_key": [{ "current_key": "AIzaSyAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" }],
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON
+          fi
+
       - name: Python runtime tests
         run: python3 -m unittest discover -s app/src/main/assets/builtin_skills/fiction-writing/scripts -p 'test_*.py' -v
 
