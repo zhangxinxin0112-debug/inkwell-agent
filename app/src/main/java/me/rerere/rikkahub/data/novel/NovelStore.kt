@@ -12,15 +12,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.UUID
 
-@Serializable
-data class NovelChapter(
-    val ordinal: Int,
-    val title: String,
-    val start: Int,
-    val end: Int,
-    val volume: String = "",
-)
-
+/** 书架条目：只存元数据。章节表单独放 .toc 文件，避免一个巨大的 JSON。 */
 @Serializable
 data class NovelMeta(
     val id: String,
@@ -33,18 +25,27 @@ data class NovelMeta(
     val progressOffset: Float = 0f,
     val lastReadAt: Long = 0,
     val createdAt: Long = 0,
-    val chapters: List<NovelChapter> = emptyList(),
+)
+
+@Serializable
+data class ChapterEntry(
+    val ordinal: Int,
+    val title: String,
+    val start: Int,
+    val end: Int,
 )
 
 /**
- * 小说书架与阅读进度。
+ * 小说书架、目录与阅读进度。
  *
- * 刻意不放进 Room：阅读功能是二改追加的，改动上游数据库版本会在升级时触发迁移失败，
- * 也会让后续跟随 RikkaHub 更新更难合并。这里用独立的 JSON 索引 + 纯文本正文，
- * 目录位于应用私有 filesDir/novels/，与聊天数据互不影响。
+ * 不放进 Room：阅读是二改追加功能，改上游数据库版本会触发迁移失败，
+ * 也让跟随 RikkaHub 更新更难合并。这里全部用应用私有目录下的文件：
+ *   novels/index.json      书架元数据
+ *   novels/<id>.txt        规范化正文
+ *   novels/<id>.toc.json   章节切分结果
  */
 class NovelStore(private val context: Context) {
-    private val json = Json { ignoreUnknownKeys = true; prettyPrint = false }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val root: File by lazy { File(context.filesDir, "novels").apply { mkdirs() } }
     private val indexFile: File by lazy { File(root, "index.json") }
 
@@ -53,6 +54,7 @@ class NovelStore(private val context: Context) {
 
     @Volatile
     private var loaded = false
+    private val tocCache = HashMap<String, List<ChapterEntry>>()
 
     @Synchronized
     fun ensureLoaded() {
@@ -65,14 +67,14 @@ class NovelStore(private val context: Context) {
         }.getOrDefault(emptyList())
     }
 
-    private fun persist(list: List<NovelMeta>) {
+    private fun persist() {
+        val list = _novels.value
         val temp = File(root, "index.json.tmp")
         temp.writeText(json.encodeToString(list))
         if (!temp.renameTo(indexFile)) {
             indexFile.writeText(json.encodeToString(list))
             temp.delete()
         }
-        _novels.value = list.sortedByDescending { it.lastReadAt }
     }
 
     suspend fun import(raw: String, title: String, author: String = ""): NovelMeta =
@@ -84,41 +86,65 @@ class NovelStore(private val context: Context) {
             _novels.value.firstOrNull { it.sha256 == sha }?.let { return@withContext it }
 
             val id = UUID.randomUUID().toString()
-            val chapters = splitChapters(text)
             File(root, "$id.txt").writeText(text, Charsets.UTF_8)
+            val toc = splitChapters(text)
+            File(root, "$id.toc.json").writeText(json.encodeToString(toc))
+            tocCache[id] = toc
+
             val meta = NovelMeta(
                 id = id,
                 title = title.trim().ifBlank { "未命名" },
                 author = author.trim(),
                 sha256 = sha,
                 charCount = text.length,
-                chapterCount = chapters.size,
+                chapterCount = toc.size,
                 createdAt = System.currentTimeMillis(),
                 lastReadAt = System.currentTimeMillis(),
-                chapters = chapters,
             )
-            persist(_novels.value + meta)
+            _novels.value = _novels.value + meta
+            persist()
             meta
         }
 
-    suspend fun readChapter(id: String, ordinal: Int): Pair<String, String> =
-        withContext(Dispatchers.IO) {
-            ensureLoaded()
-            val meta = _novels.value.firstOrNull { it.id == id } ?: return@withContext "" to ""
-            val chapter = meta.chapters.getOrNull(ordinal) ?: return@withContext "" to ""
-            val file = File(root, "$id.txt")
-            if (!file.exists()) return@withContext chapter.title to ""
-            val cached = cacheFor(id, file)
-            val end = chapter.end.coerceAtMost(cached.length)
-            val start = chapter.start.coerceAtMost(end)
-            chapter.title to cached.substring(start, end)
-        }
+    fun chapters(id: String): List<ChapterEntry> {
+        tocCache[id]?.let { return it }
+        val file = File(root, "$id.toc.json")
+        if (!file.exists()) return emptyList()
+        return runCatching {
+            json.decodeFromString<List<ChapterEntry>>(file.readText())
+        }.getOrDefault(emptyList()).also { tocCache[id] = it }
+    }
+
+    /**
+     * 取一章的指定区间。长章由调用方分页，避免把几十万字一次交给 Compose。
+     */
+    suspend fun readChapter(
+        id: String,
+        ordinal: Int,
+        fromChapterStart: Int = 0,
+        limit: Int = Int.MAX_VALUE,
+    ): Pair<String, String> = withContext(Dispatchers.IO) {
+        ensureLoaded()
+        val chapter = chapters(id).getOrNull(ordinal) ?: return@withContext "" to ""
+        val file = File(root, "$id.txt")
+        if (!file.exists()) return@withContext chapter.title to ""
+        val text = loadText(id, file)
+        val chapterEnd = chapter.end.coerceAtMost(text.length)
+        val start = (chapter.start + fromChapterStart).coerceIn(chapter.start, chapterEnd)
+        val end = if (limit >= chapterEnd - start) chapterEnd else start + limit
+        chapter.title to text.substring(start, end)
+    }
+
+    fun chapterLength(id: String, ordinal: Int): Int {
+        val chapter = chapters(id).getOrNull(ordinal) ?: return 0
+        return (chapter.end - chapter.start).coerceAtLeast(0)
+    }
 
     private var cachedId: String? = null
     private var cachedText: String? = null
 
     @Synchronized
-    private fun cacheFor(id: String, file: File): String {
+    private fun loadText(id: String, file: File): String {
         if (cachedId == id) cachedText?.let { return it }
         val text = file.readText(Charsets.UTF_8)
         cachedId = id
@@ -128,24 +154,27 @@ class NovelStore(private val context: Context) {
 
     suspend fun saveProgress(id: String, chapter: Int, offset: Float) = withContext(Dispatchers.IO) {
         ensureLoaded()
-        val updated = _novels.value.map {
+        _novels.value = _novels.value.map {
             if (it.id == id) it.copy(
                 progressChapter = chapter,
                 progressOffset = offset.coerceIn(0f, 1f),
                 lastReadAt = System.currentTimeMillis(),
             ) else it
         }
-        persist(updated)
+        persist()
     }
 
     suspend fun delete(id: String) = withContext(Dispatchers.IO) {
         ensureLoaded()
         File(root, "$id.txt").delete()
+        File(root, "$id.toc.json").delete()
         if (cachedId == id) {
             cachedId = null
             cachedText = null
         }
-        persist(_novels.value.filterNot { it.id == id })
+        tocCache.remove(id)
+        _novels.value = _novels.value.filterNot { it.id == id }
+        persist()
     }
 
     fun find(id: String): NovelMeta? {
@@ -158,35 +187,31 @@ class NovelStore(private val context: Context) {
             .digest(text.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it) }
 
-    private val chapterHeading = Regex(
-        """^\s*第\s*[0-9零〇一二三四五六七八九十百千万两]+\s*[章节回].*$"""
-    )
-    private val volumeHeading = Regex("""^\s*第\s*[0-9零〇一二三四五六七八九十百千万两]+\s*卷.*$""")
+    private val chapterRegex = Regex("""^第\s*[0-9零〇一二三四五六七八九十百千万两]+\s*[章节回].*""")
+    private val volumeRegex = Regex("""^第\s*[0-9零〇一二三四五六七八九十百千万两]+\s*卷.*""")
 
-    private fun splitChapters(text: String): List<NovelChapter> {
+    private fun splitChapters(text: String): List<ChapterEntry> {
         val lines = text.split('\n')
         val offsets = IntArray(lines.size)
         var cursor = 0
-        lines.forEachIndexed { i, line ->
+        for (i in lines.indices) {
             offsets[i] = cursor
-            cursor += line.length + 1
+            cursor += lines[i].length + 1
         }
         val heads = ArrayList<Pair<Int, String>>()
-        var volume = ""
-        lines.forEachIndexed { i, raw ->
-            val line = raw.trim()
-            when {
-                line.length <= 40 && volumeHeading.matches(line) -> volume = line
-                line.length <= 120 && chapterHeading.matches(line) -> heads += i to line
-            }
+        for (i in lines.indices) {
+            val line = lines[i].trim()
+            if (line.isEmpty() || line.length > 120) continue
+            if (volumeRegex.matches(line)) continue
+            if (chapterRegex.matches(line)) heads += i to line
         }
         if (heads.isEmpty()) {
-            return listOf(NovelChapter(0, "正文", 0, text.length, ""))
+            return listOf(ChapterEntry(0, "正文", 0, text.length))
         }
         return heads.mapIndexed { index, (lineIndex, title) ->
-            val start = (offsets.getOrNull(lineIndex + 1) ?: text.length)
+            val start = if (lineIndex + 1 < offsets.size) offsets[lineIndex + 1] else text.length
             val end = if (index + 1 < heads.size) offsets[heads[index + 1].first] else text.length
-            NovelChapter(index, title, start, end.coerceAtMost(text.length), volume)
+            ChapterEntry(index, title, start.coerceAtMost(text.length), end.coerceAtMost(text.length))
         }
     }
 }

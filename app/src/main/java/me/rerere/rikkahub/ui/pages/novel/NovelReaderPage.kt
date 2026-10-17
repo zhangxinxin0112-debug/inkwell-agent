@@ -44,9 +44,8 @@ import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.ListView
 import me.rerere.hugeicons.stroke.TextFont
-import me.rerere.rikkahub.data.novel.NovelChapter
+import me.rerere.rikkahub.data.novel.ChapterEntry
 import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
@@ -57,9 +56,9 @@ fun NovelReaderPage(
     novelId: String,
     vm: NovelReaderVM = koinViewModel(parameters = { parametersOf(novelId) }),
 ) {
-    val navController = LocalNavController.current
     val novel by vm.novel.collectAsStateWithLifecycle()
     val state by vm.state.collectAsStateWithLifecycle()
+    val chapters by vm.chapters.collectAsStateWithLifecycle()
     val typeVersion by vm.typeVersion.collectAsStateWithLifecycle()
 
     var showCatalog by remember { mutableStateOf(false) }
@@ -68,20 +67,12 @@ fun NovelReaderPage(
     val scroll = rememberScrollState()
     val scope = rememberCoroutineScope()
 
-    // 排版参数变化后重新读取，触发正文重组。
     val fontSize = remember(typeVersion) { vm.fontSize }
     val lineHeight = remember(typeVersion) { vm.lineHeight }
 
-    // 首次进入时恢复上次的章内位置。
-    LaunchedEffect(state.chapter, state.loading) {
-        if (!state.loading && state.offset > 0f && scroll.value == 0) {
-            scroll.scrollTo((scroll.maxValue * state.offset).toInt())
-        }
-    }
-    LaunchedEffect(scroll.value) {
-        if (scroll.maxValue > 0) {
-            vm.saveOffset(scroll.value.toFloat() / scroll.maxValue)
-        }
+    // 翻页后回到页首
+    LaunchedEffect(state.chapter, state.page) {
+        scroll.scrollTo(0)
     }
 
     Scaffold(
@@ -94,13 +85,22 @@ fun NovelReaderPage(
                             style = MaterialTheme.typography.titleMedium,
                             maxLines = 1,
                         )
-                        if (novel != null) {
-                            Text(
-                                text = "${state.chapter + 1} / ${novel!!.chapterCount}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        Text(
+                            text = buildString {
+                                append(state.chapter + 1)
+                                append(" / ")
+                                append(novel?.chapterCount ?: 0)
+                                if (state.pageCount > 1) {
+                                    append("　第 ")
+                                    append(state.page + 1)
+                                    append("/")
+                                    append(state.pageCount)
+                                    append(" 页")
+                                }
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 },
                 navigationIcon = { BackButton() },
@@ -121,23 +121,31 @@ fun NovelReaderPage(
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Text("这本书已不存在", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        } else {
-            Column(Modifier.fillMaxSize().padding(padding)) {
-                if (state.loading) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                }
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .verticalScroll(scroll)
-                        .padding(horizontal = 22.dp),
-                ) {
+            return@Scaffold
+        }
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            if (state.loading) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+            }
+            Column(
+                Modifier
+                    .weight(1f)
+                    .verticalScroll(scroll)
+                    .padding(horizontal = 22.dp),
+            ) {
+                Text(
+                    text = state.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 18.dp, bottom = 20.dp),
+                )
+                if (state.body.isBlank()) {
                     Text(
-                        text = state.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 18.dp, bottom = 20.dp),
+                        text = "这一页没有内容。可能是章节切分不完整，请检查目录或用「重新导入」修正。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                } else {
                     Text(
                         text = state.body
                             .split('\n')
@@ -149,27 +157,22 @@ fun NovelReaderPage(
                         ),
                         color = MaterialTheme.colorScheme.onSurface,
                     )
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 26.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        TextButton(
-                            onClick = {
-                                vm.prev()
-                                scope.launch { scroll.scrollTo(0) }
-                            },
-                            enabled = state.chapter > 0,
-                            modifier = Modifier.weight(1f),
-                        ) { Text("上一章") }
-                        TextButton(
-                            onClick = {
-                                vm.next()
-                                scope.launch { scroll.scrollTo(0) }
-                            },
-                            enabled = novel != null && state.chapter + 1 < (novel?.chapterCount ?: 0),
-                            modifier = Modifier.weight(1f),
-                        ) { Text("下一章") }
-                    }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 26.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TextButton(
+                        onClick = { vm.prevPage() },
+                        enabled = state.chapter > 0 || state.page > 0,
+                        modifier = Modifier.weight(1f),
+                    ) { Text("上一页") }
+                    TextButton(
+                        onClick = { vm.nextPage() },
+                        enabled = state.page + 1 < state.pageCount ||
+                            state.chapter + 1 < (novel?.chapterCount ?: 0),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("下一页") }
                 }
             }
         }
@@ -181,7 +184,7 @@ fun NovelReaderPage(
             sheetState = sheetState,
         ) {
             CatalogSheet(
-                chapters = novel?.chapters.orEmpty(),
+                chapters = chapters,
                 current = state.chapter,
                 onSelect = {
                     vm.open(it)
@@ -208,7 +211,7 @@ fun NovelReaderPage(
 
 @Composable
 private fun CatalogSheet(
-    chapters: List<NovelChapter>,
+    chapters: List<ChapterEntry>,
     current: Int,
     onSelect: (Int) -> Unit,
 ) {
@@ -218,7 +221,7 @@ private fun CatalogSheet(
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
         Text(
-            text = "目录",
+            text = "目录（共 ${chapters.size} 章）",
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
         )
