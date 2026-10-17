@@ -45,7 +45,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -160,7 +159,9 @@ fun NovelReaderPage(
                                 }
                             }
                         },
-                        style = MaterialTheme.typography.bodyLarge.copy(lineHeight = vm.lineHeight.em()),
+                        style = MaterialTheme.typography.bodyLarge.copy(
+                            lineHeight = (vm.fontSize * vm.lineHeight).sp,
+                        ),
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Row(
