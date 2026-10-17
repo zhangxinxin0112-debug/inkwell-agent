@@ -99,6 +99,8 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceTerminalPage
 import me.rerere.workspace.WorkspaceStorageArea
 import me.rerere.rikkahub.ui.pages.favorite.FavoritePage
 import me.rerere.rikkahub.ui.pages.history.HistoryPage
+import me.rerere.rikkahub.ui.pages.novel.NovelReaderPage
+import me.rerere.rikkahub.ui.pages.novel.NovelShelfPage
 import me.rerere.rikkahub.ui.pages.imggen.ImageGenPage
 import me.rerere.rikkahub.ui.pages.log.LogPage
 import me.rerere.rikkahub.ui.pages.search.SearchPage
@@ -338,6 +340,12 @@ class RouteActivity : ComponentActivity() {
                                 )
                             }
 
+                            entry<Screen.NovelShelf> {
+                                NovelShelfPage()
+                            }
+                            entry<Screen.NovelReader> { key ->
+                                NovelReaderPage(novelId = key.id)
+                            }
                             entry<Screen.History> {
                                 HistoryPage()
                             }
@@ -583,6 +591,10 @@ sealed interface Screen : NavKey {
     @Serializable
     data class ShareHandler(val text: String, val streamUri: String? = null) : Screen
 
+    @Serializable
+    data object NovelShelf : Screen
+    @Serializable
+    data class NovelReader(val id: String) : Screen
     @Serializable
     data object History : Screen
 

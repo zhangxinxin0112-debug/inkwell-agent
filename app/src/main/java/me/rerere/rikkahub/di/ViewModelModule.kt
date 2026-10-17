@@ -19,12 +19,19 @@ import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceDetailVM
 import me.rerere.rikkahub.ui.pages.extensions.workspace.WorkspaceVM
 import me.rerere.rikkahub.ui.pages.setting.SettingVM
 import me.rerere.rikkahub.ui.pages.share.handler.ShareHandlerVM
+import me.rerere.rikkahub.ui.pages.novel.NovelReaderVM
+import me.rerere.rikkahub.ui.pages.novel.NovelShelfVM
 import me.rerere.rikkahub.ui.pages.translator.TranslatorVM
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
 val viewModelModule = module {
+    viewModel<NovelReaderVM> { params ->
+        NovelReaderVM(params.get(), get(), get())
+    }
+    viewModelOf(::NovelShelfVM)
+
     viewModel<ChatVM> { params ->
         ChatVM(
             id = params.get(),
