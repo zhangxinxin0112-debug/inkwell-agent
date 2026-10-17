@@ -234,6 +234,28 @@ ORDER BY c.ordinal,r.id LIMIT ? OFFSET ?''',(source,cutoff,*(['%'+query+'%']*3),
         return {'entries':[dict(r, payload=json.loads(r['payload'])) for r in rows[:limit]],
                 'truncated':len(rows)>limit,'next_offset':offset+limit if len(rows)>limit else None,'warning':'Cutoff filters evidence discovery only; phase/knowledge applicability must still be checked. Conflicts and old revisions are intentionally retained.'}
 
+    def browse(self, source, category=None, entity=None, offset=0, limit=20):
+        if not self.db.execute("SELECT 1 FROM sources WHERE id=?",(source,)).fetchone():raise ValueError("Source not found")
+        if category is not None:choice(category,CATEGORIES,"category")
+        offset=max(0,int(offset));limit=min(max(1,int(limit)),50)
+        where=["e.source=?"];args=[source]
+        if category:where.append("e.category=?");args.append(category)
+        if entity:where.append("e.entity LIKE ?");args.append("%"+entity+"%")
+        sql="""SELECT e.id,e.category,e.entity,e.topic,r.payload,r.id AS latest_revision,\n(SELECT COUNT(*) FROM revisions x WHERE x.entry=e.id) AS revision_count,\n(SELECT MAX(c2.ordinal) FROM revisions x JOIN chapters c2 ON c2.id=x.chapter WHERE x.entry=e.id) AS last_ordinal\nFROM entries e JOIN revisions r ON r.entry=e.id\nWHERE """ + " AND ".join(where) + """ AND r.id=(SELECT MAX(x2.id) FROM revisions x2 WHERE x2.entry=e.id)\nORDER BY e.category,e.entity,e.id LIMIT ? OFFSET ?"""
+        rows=self.db.execute(sql,args+[limit+1,offset]).fetchall()
+        counts=self.db.execute("SELECT category,COUNT(*) n FROM entries WHERE source=? GROUP BY category",(source,)).fetchall()
+        sql="""SELECT e.entity,e.topic,c.ordinal,r.payload FROM entries e
+JOIN revisions r ON r.entry=e.id JOIN chapters c ON c.id=r.chapter
+WHERE e.source=? AND json_extract(r.payload,'$.update')='conflict' ORDER BY c.ordinal"""
+        conflicts=[dict(r,payload=json.loads(r["payload"])) for r in self.db.execute(sql,(source,)).fetchall()[:20]]
+        stats=self.status(source,0,1)
+        return {"entries":[dict(r,payload=json.loads(r["payload"])) for r in rows[:limit]],
+                "truncated":len(rows)>limit,"next_offset":offset+limit if len(rows)>limit else None,
+                "counts_by_category":{r["category"]:r["n"] for r in counts},"conflicts":conflicts,
+                "progress":{"chapters_complete":stats["complete"],"chapters_total":stats["total"],
+                            "next_chapter":stats["next"],"entries":stats["entries"]},
+                "note":"Latest revision only; full history remains. Conflicts are preserved, never auto-resolved."}
+
     def export(self, source):
         meta=self.db.execute('SELECT * FROM sources WHERE id=?',(source,)).fetchone()
         if not meta:raise ValueError('Source not found')
@@ -287,6 +309,8 @@ def dispatch(store, action, data):
     if action=='audit':return store.audit(int(data['chapter']),data['checks'])
     if action=='finish':return store.finish(int(data['chapter']))
     if action=='search':return store.search(int(data['source']),data.get('query',''),int(data['through']) if data.get('through') is not None else None,int(data.get('limit',30)),int(data.get('offset',0)))
+    if action=='browse':
+        return store.browse(int(data['source']),data.get('category'),data.get('entity'),data.get('offset',0),data.get('limit',20))
     if action=='export':return store.export(int(data['source']))
     if action=='save':return store.save(data['kind'],data['title'],data['body'])
     if action=='documents':return store.documents(data.get('query',''))

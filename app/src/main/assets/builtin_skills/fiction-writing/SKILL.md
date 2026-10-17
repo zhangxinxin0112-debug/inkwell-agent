@@ -97,3 +97,8 @@ kind 为 explicit / reported / inference / analysis；update 为 new / supplemen
 `export, {"source":源ID}` 为每个分类/实体生成独立 Markdown 档案及 index.md，位于项目 exports/源ID/。可用 RikkaHub 现有工作区文件浏览器和编辑器打开。导出保留各章证据与所有修订，不是把全书塞进一个文件。导出文件可重生成，数据库才是档案的持久化来源。
 
 status 支持 offset/limit，search 支持 offset/limit；truncated 时分页或缩小查询。默认不返回全书目录，以免占满上下文。
+
+
+## 查看档案全景
+
+`browse, {"source":源ID,"category":"character","entity":"可选筛选","offset":0,"limit":20}` 返回各类条目数、当前进度、最近修订和 conflict 记录。只返回每条的最新修订，完整历史仍在数据库中；分页使用 next_offset。拆下一章前先浏览相关实体，避免重复建档；发现 conflict 必须在正文或后续精读中保留双方说法，不能自行消除。

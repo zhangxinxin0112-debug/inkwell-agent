@@ -1,0 +1,69 @@
+name: Build fork APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [writing-agent]
+    tags: ['fork-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Same prerequisites as upstream: web-ui is compiled into the APK.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web-ui/pnpm-lock.yaml
+      - name: Install web-ui dependencies
+        working-directory: web-ui
+        run: pnpm install --frozen-lockfile
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+
+      - name: Signing key
+        env:
+          KEY_BASE64: ${{ secrets.FORK_KEY_BASE64 }}
+          SIGNING_CONFIG: ${{ secrets.FORK_SIGNING_CONFIG }}
+        run: |
+          if [ -n "$KEY_BASE64" ]; then
+            echo "$KEY_BASE64" | base64 -d > app/app.key
+            printf '%s\n' "$SIGNING_CONFIG" > local.properties
+          else
+            echo "::warning::No signing secrets; producing an unsigned release APK for testing only."
+          fi
+
+      - name: Python runtime tests
+        run: python3 -m unittest discover -s app/src/main/assets/builtin_skills/fiction-writing/scripts -p 'test_*.py' -v
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest assembleDebug --console=plain
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rikkahub-writing-agent-debug
+          path: app/build/outputs/apk/debug/*.apk

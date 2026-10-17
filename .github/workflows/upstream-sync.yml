@@ -1,0 +1,60 @@
+name: Check upstream RikkaHub release
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Fetch official release
+        id: upstream
+        run: |
+          set -e
+          git remote add upstream https://github.com/rikkahub/rikkahub.git || true
+          git fetch --tags upstream
+          LATEST=$(git tag --list --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          if [ -z "$LATEST" ]; then echo "No official release tag found"; exit 0; fi
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor "$LATEST" HEAD; then
+            echo "need_sync=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "need_sync=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge on a review branch
+        if: steps.upstream.outputs.need_sync == 'true'
+        run: |
+          set -e
+          git config user.name 'fork-sync'
+          git config user.email 'fork-sync@users.noreply.github.com'
+          BRANCH="sync/upstream-${{ steps.upstream.outputs.latest }}"
+          git switch -c "$BRANCH"
+          # Never auto-resolve conflicts: a human must inspect feature code and migrations.
+          git -c core.editor=true merge --no-ff "upstream/${{ steps.upstream.outputs.latest }}" || {
+            echo "::error::Merge conflict. Resolve locally; this workflow intentionally does not guess."
+            git merge --abort || true
+            exit 1
+          }
+          git push origin "$BRANCH"
+          echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+
+      - name: Open review PR
+        if: steps.upstream.outputs.need_sync == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr create --head "$BRANCH" --base writing-agent \
+            --title "Update to RikkaHub ${{ steps.upstream.outputs.latest }}" \
+            --body "Automated upstream merge. Build/tests run in the Build fork APK workflow. Review chat, workspace tools, built-in skill conflicts and any Room/database migrations before merging." || true

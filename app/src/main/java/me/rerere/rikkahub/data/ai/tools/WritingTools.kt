@@ -11,7 +11,7 @@ import me.rerere.rikkahub.data.files.SkillManager
 import me.rerere.rikkahub.data.repository.WorkspaceRepository
 
 internal const val WRITING_SKILL_NAME = "fiction-writing"
-private val writingActions = setOf("init", "import", "status", "read", "record", "audit", "finish", "search", "save", "documents", "export")
+private val writingActions = setOf("init", "import", "status", "read", "record", "audit", "finish", "search", "browse", "save", "documents", "export")
 
 /** Narrow bridge to the versioned workspace runtime. No additional UI or global settings. */
 fun createWritingTools(

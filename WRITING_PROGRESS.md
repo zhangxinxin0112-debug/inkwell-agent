@@ -31,3 +31,9 @@ Kotlin shell 参数测试已编写，尚未执行。git diff --check 通过。
 ## 下一步
 
 完成构建工具链与 Kotlin 编译，验证工作区启用技能和工具调用；增加项目与原著目录确认、细粒度档案浏览及出处页，再以连续几章进行实际拆书抽样评估。未达标不启动整书自动拆解。
+
+## 2026-10-17 追加
+
+- 增加 browse（分类计数、最新修订、冲突清单、分页和进度）与 export（按实体生成 Markdown 档案）。browse 手工验证：分类计数、冲突数、总章节数和修订数正常。
+- 构建方式确认：本机 aarch64；AGP aapt2 仅提供 linux/osx/windows x86_64，Google 仓库无 linux-arm64（实测 404）。已停止本机构建与无意义下载，清理下载残留。
+- 新增 .github/workflows/fork-build.yml（x86_64 CI 编译、运行 Python 测试、产出 debug APK）与 upstream-sync.yml（每日检查官方 release，自动合并到评审分支；冲突必须人工处理）。仓库尚未推送到 GitHub，也未配置 Actions/签名 Secrets，因此工作流均未实际运行。
