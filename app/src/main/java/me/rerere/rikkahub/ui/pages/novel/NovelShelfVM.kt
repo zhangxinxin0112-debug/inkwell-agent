@@ -5,47 +5,54 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import me.rerere.rikkahub.data.db.entity.NovelEntity
-import me.rerere.rikkahub.data.repository.NovelRepository
+import me.rerere.rikkahub.data.novel.NovelMeta
+import me.rerere.rikkahub.data.novel.NovelStore
 import java.io.File
 
 class NovelShelfVM(
-    private val repository: NovelRepository,
+    private val store: NovelStore,
     private val context: Context,
 ) : ViewModel() {
 
-    val novels: StateFlow<List<NovelEntity>> = repository.listNovels()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    init {
+        store.ensureLoaded()
+    }
 
-    suspend fun importFile(uri: Uri): Result<NovelEntity> = runCatching {
-        val name = queryDisplayName(uri) ?: "未命名"
-        val raw = withContext(Dispatchers.IO) {
+    val novels: StateFlow<List<NovelMeta>> = store.novels
+
+    suspend fun import(uri: Uri): Result<NovelMeta> = runCatching {
+        val name = displayName(uri) ?: "未命名.txt"
+        val bytes = withContext(Dispatchers.IO) {
             context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 ?: error("无法读取文件")
         }
-        val text = decode(raw)
-        val title = name.substringBeforeLast('.').ifBlank { "未命名" }
-        repository.import(text, title)
+        val text = decode(bytes)
+        store.import(text, name.substringBeforeLast('.').ifBlank { "未命名" })
     }
 
-    private fun queryDisplayName(uri: Uri): String? = runCatching {
+    fun delete(id: String) {
+        viewModelScope.launch { store.delete(id) }
+    }
+
+    private fun displayName(uri: Uri): String? = runCatching {
         context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val idx = cursor.getColumnIndex("_display_name")
-            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+            val index = cursor.getColumnIndex("_display_name")
+            if (index >= 0 && cursor.moveToFirst()) cursor.getString(index) else null
         }
     }.getOrNull() ?: uri.lastPathSegment?.let { File(it).name }
 
-    /** TXT 常见编码：优先 UTF-8，其次 GB18030（国内 txt 常用）。 */
+    /** TXT 常见编码：带 BOM 的 UTF-8、普通 UTF-8，最后退到 GB18030。 */
     private fun decode(bytes: ByteArray): String {
-        val head = bytes.take(3).toByteArray()
-        if (head.size == 3 && head[0] == 0xEF.toByte() && head[1] == 0xBB.toByte() && head[2] == 0xBF.toByte()) {
+        if (bytes.size >= 3 &&
+            bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()
+        ) {
             return String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
         }
-        return runCatching { String(bytes, Charsets.UTF_8) }
-            .getOrElse { String(bytes, charset("GB18030")) }
+        val utf8 = String(bytes, Charsets.UTF_8)
+        // 含替换字符说明不是合法 UTF-8，改按国标解码。
+        return if ('\uFFFD' in utf8) String(bytes, charset("GB18030")) else utf8
     }
 }

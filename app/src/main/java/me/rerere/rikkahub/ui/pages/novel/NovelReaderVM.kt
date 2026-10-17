@@ -1,101 +1,99 @@
 package me.rerere.rikkahub.ui.pages.novel
 
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.firstOrNull
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import me.rerere.rikkahub.data.db.entity.NovelChapterEntity
-import me.rerere.rikkahub.data.db.entity.NovelEntity
-import me.rerere.rikkahub.data.repository.NovelRepository
+import me.rerere.rikkahub.data.novel.NovelMeta
+import me.rerere.rikkahub.data.novel.NovelStore
 
-data class ReadingState(
+data class ReaderState(
     val chapter: Int = 0,
     val title: String = "",
+    val body: String = "",
     val offset: Float = 0f,
-    val loading: Boolean = false,
+    val loading: Boolean = true,
+    val missing: Boolean = false,
 )
 
 class NovelReaderVM(
     private val novelId: String,
-    private val repository: NovelRepository,
-    private val preferences: NovelTypePreferences,
+    private val store: NovelStore,
 ) : ViewModel() {
 
-    val novel: StateFlow<NovelEntity?> = repository.getNovel(novelId)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    private val _state = MutableStateFlow(ReaderState())
+    val state: StateFlow<ReaderState> = _state.asStateFlow()
 
-    val chapters: StateFlow<List<NovelChapterEntity>> = repository.listChapters(novelId)
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val _novel = MutableStateFlow<NovelMeta?>(null)
+    val novel: StateFlow<NovelMeta?> = _novel.asStateFlow()
 
-    val body = MutableStateFlow<String?>(null)
-    val reading = MutableStateFlow(ReadingState())
+    private val _typeVersion = MutableStateFlow(0)
+    val typeVersion: StateFlow<Int> = _typeVersion.asStateFlow()
 
-    val fontSize: Int get() = preferences.fontSize
-    val lineHeight: Float get() = preferences.lineHeight
-
-    /** 字号/行距改动后递增，供页面重组。 */
-    val typeRevision = MutableStateFlow(0)
-
-    private var initialised = false
+    var fontSize: Int = 18
+        private set
+    var lineHeight: Float = 1.8f
+        private set
 
     init {
         viewModelScope.launch {
-            val saved = repository.getNovel(novelId).firstOrNullValue()
-            val start = saved?.progressChapter ?: 0
-            openChapter(start, saved?.progressOffset ?: 0f)
-            initialised = true
+            val meta = store.find(novelId)
+            _novel.value = meta
+            if (meta == null) {
+                _state.value = ReaderState(loading = false, missing = true)
+                return@launch
+            }
+            load(meta.progressChapter, meta.progressOffset)
         }
     }
 
-    fun openChapter(ordinal: Int, offset: Float = 0f) {
-        viewModelScope.launch {
-            val current = novel.value ?: repository.getNovel(novelId).firstOrNullValue() ?: return@launch
-            reading.value = reading.value.copy(chapter = ordinal, loading = true, offset = offset)
-            val chapter = chapters.value.getOrNull(ordinal)
-                ?: repository.getChapter(novelId, ordinal)
-            val text = repository.readChapter(current, ordinal)
-            reading.value = ReadingState(
-                chapter = ordinal,
-                title = chapter?.title ?: "第 ${ordinal + 1} 章",
-                offset = offset,
-                loading = false,
-            )
-            body.value = text
-            repository.saveProgress(novelId, ordinal, offset)
-        }
+    private suspend fun load(ordinal: Int, offset: Float) {
+        _state.value = _state.value.copy(chapter = ordinal, loading = true, offset = offset)
+        val (title, body) = store.readChapter(novelId, ordinal)
+        _state.value = ReaderState(
+            chapter = ordinal,
+            title = title,
+            body = body,
+            offset = offset,
+            loading = false,
+        )
+        store.saveProgress(novelId, ordinal, offset)
     }
 
-    fun prevChapter() {
-        if (reading.value.chapter > 0) openChapter(reading.value.chapter - 1)
+    fun open(ordinal: Int) {
+        viewModelScope.launch { load(ordinal, 0f) }
     }
 
-    fun nextChapter() {
-        openChapter(reading.value.chapter + 1)
+    fun prev() {
+        val current = _state.value.chapter
+        if (current > 0) open(current - 1)
+    }
+
+    fun next() {
+        val total = _novel.value?.chapterCount ?: return
+        val current = _state.value.chapter
+        if (current + 1 < total) open(current + 1)
     }
 
     fun saveOffset(offset: Float) {
-        if (!initialised) return
-        reading.value = reading.value.copy(offset = offset)
-        viewModelScope.launch {
-            repository.saveProgress(novelId, reading.value.chapter, offset)
-        }
+        if (_state.value.loading) return
+        _state.value = _state.value.copy(offset = offset)
+        viewModelScope.launch { store.saveProgress(novelId, _state.value.chapter, offset) }
     }
 
-    fun updateFontSize(value: Int) {
-        preferences.fontSize = value.coerceIn(14, 26)
-        typeRevision.value++
+    fun changeFontSize(value: Int) {
+        fontSize = value.coerceIn(14, 26)
+        _typeVersion.value++
     }
 
-    fun updateLineHeight(value: Float) {
-        preferences.lineHeight = value.coerceIn(1.3f, 2.4f)
-        typeRevision.value++
+    fun changeLineHeight(value: Float) {
+        lineHeight = value.coerceIn(1.3f, 2.4f)
+        _typeVersion.value++
     }
 }
-
-private suspend fun kotlinx.coroutines.flow.Flow<NovelEntity?>.firstOrNullValue(): NovelEntity? =
-    firstOrNull()

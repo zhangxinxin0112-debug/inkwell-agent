@@ -1,22 +1,17 @@
 package me.rerere.rikkahub.ui.pages.novel
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -33,6 +28,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,57 +36,48 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
-import me.rerere.hugeicons.stroke.Book02
-import me.rerere.hugeicons.stroke.Cancel01
 import me.rerere.hugeicons.stroke.ListView
 import me.rerere.hugeicons.stroke.TextFont
+import me.rerere.rikkahub.data.novel.NovelChapter
 import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.context.LocalNavController
+import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
+import org.koin.core.parameter.parametersOf
 
-/**
- * 阅读器。沿用聊天页的 Scaffold / TopAppBar / 圆角卡片与配色，
- * 不做另一套视觉；正文用可调字号与行距的纯文本排版。
- */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NovelReaderPage(
     novelId: String,
-    vm: NovelReaderVM = koinViewModel(parameters = { org.koin.core.parameter.parametersOf(novelId) }),
+    vm: NovelReaderVM = koinViewModel(parameters = { parametersOf(novelId) }),
 ) {
     val navController = LocalNavController.current
     val novel by vm.novel.collectAsStateWithLifecycle()
-    val chapters by vm.chapters.collectAsStateWithLifecycle()
-    val body by vm.body.collectAsStateWithLifecycle()
-    val reading by vm.reading.collectAsStateWithLifecycle()
-    val typeRevision by vm.typeRevision.collectAsStateWithLifecycle()
-    // 字号/行距改过之后重新取一次，触发正文排版重组。
-    val fontSize = remember(typeRevision) { vm.fontSize }
-    val lineHeight = remember(typeRevision) { vm.lineHeight }
+    val state by vm.state.collectAsStateWithLifecycle()
+    val typeVersion by vm.typeVersion.collectAsStateWithLifecycle()
 
     var showCatalog by remember { mutableStateOf(false) }
-    var showSettings by remember { mutableStateOf(false) }
+    var showType by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scroll = rememberScrollState()
     val scope = rememberCoroutineScope()
 
-    // 恢复上次阅读位置
-    LaunchedEffect(novel?.id, reading.chapter) {
-        if (reading.offset > 0f && scroll.value == 0) {
-            scroll.scrollTo((scroll.maxValue * reading.offset).toInt())
+    // 排版参数变化后重新读取，触发正文重组。
+    val fontSize = remember(typeVersion) { vm.fontSize }
+    val lineHeight = remember(typeVersion) { vm.lineHeight }
+
+    // 首次进入时恢复上次的章内位置。
+    LaunchedEffect(state.chapter, state.loading) {
+        if (!state.loading && state.offset > 0f && scroll.value == 0) {
+            scroll.scrollTo((scroll.maxValue * state.offset).toInt())
         }
     }
-    // 离开页面时保存滚动位置
     LaunchedEffect(scroll.value) {
         if (scroll.maxValue > 0) {
             vm.saveOffset(scroll.value.toFloat() / scroll.maxValue)
@@ -109,7 +96,7 @@ fun NovelReaderPage(
                         )
                         if (novel != null) {
                             Text(
-                                text = "${reading.chapter + 1} / ${novel!!.chapterCount}",
+                                text = "${state.chapter + 1} / ${novel!!.chapterCount}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -121,7 +108,7 @@ fun NovelReaderPage(
                     IconButton(onClick = { showCatalog = true }) {
                         Icon(HugeIcons.ListView, contentDescription = "目录")
                     }
-                    IconButton(onClick = { showSettings = true }) {
+                    IconButton(onClick = { showType = true }) {
                         Icon(HugeIcons.TextFont, contentDescription = "排版")
                     }
                 },
@@ -130,56 +117,56 @@ fun NovelReaderPage(
         },
         containerColor = MaterialTheme.colorScheme.surface,
     ) { padding ->
-        when {
-            novel == null || (body == null && !reading.loading) -> Box(
-                Modifier.fillMaxSize().padding(padding),
-                contentAlignment = Alignment.Center,
-            ) { Text("找不到这本书", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-
-            else -> Column(Modifier.fillMaxSize().padding(padding)) {
-                if (reading.loading) {
+        if (state.missing) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                Text("这本书已不存在", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                if (state.loading) {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
                 Column(
-                    modifier = Modifier
+                    Modifier
                         .weight(1f)
                         .verticalScroll(scroll)
                         .padding(horizontal = 22.dp),
                 ) {
                     Text(
-                        text = reading.title,
+                        text = state.title,
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(top = 18.dp, bottom = 20.dp),
                     )
                     Text(
-                        text = buildAnnotatedString {
-                            body.orEmpty().trim().split('\n').forEach { line ->
-                                if (line.isNotBlank()) {
-                                    withStyle(SpanStyle(fontSize = fontSize.sp)) {
-                                        append(line.trim())
-                                    }
-                                    append("\n\n")
-                                }
-                            }
-                        },
+                        text = state.body
+                            .split('\n')
+                            .filter { it.isNotBlank() }
+                            .joinToString("\n\n") { it.trim() },
                         style = MaterialTheme.typography.bodyLarge.copy(
+                            fontSize = fontSize.sp,
                             lineHeight = (fontSize * lineHeight).sp,
                         ),
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 26.dp),
+                        Modifier.fillMaxWidth().padding(vertical = 26.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         TextButton(
-                            onClick = { vm.prevChapter(); scope.launch { scroll.scrollTo(0) } },
-                            enabled = reading.chapter > 0,
+                            onClick = {
+                                vm.prev()
+                                scope.launch { scroll.scrollTo(0) }
+                            },
+                            enabled = state.chapter > 0,
                             modifier = Modifier.weight(1f),
                         ) { Text("上一章") }
                         TextButton(
-                            onClick = { vm.nextChapter(); scope.launch { scroll.scrollTo(0) } },
-                            enabled = novel != null && reading.chapter + 1 < (novel?.chapterCount ?: 0),
+                            onClick = {
+                                vm.next()
+                                scope.launch { scroll.scrollTo(0) }
+                            },
+                            enabled = novel != null && state.chapter + 1 < (novel?.chapterCount ?: 0),
                             modifier = Modifier.weight(1f),
                         ) { Text("下一章") }
                     }
@@ -189,33 +176,39 @@ fun NovelReaderPage(
     }
 
     if (showCatalog) {
-        ModalBottomSheet(onDismissRequest = { showCatalog = false }, sheetState = sheetState) {
-            NovelCatalog(
-                chapters = chapters,
-                current = reading.chapter,
+        ModalBottomSheet(
+            onDismissRequest = { showCatalog = false },
+            sheetState = sheetState,
+        ) {
+            CatalogSheet(
+                chapters = novel?.chapters.orEmpty(),
+                current = state.chapter,
                 onSelect = {
-                    vm.openChapter(it)
+                    vm.open(it)
                     showCatalog = false
                     scope.launch { scroll.scrollTo(0) }
                 },
             )
         }
     }
-    if (showSettings) {
-        ModalBottomSheet(onDismissRequest = { showSettings = false }, sheetState = sheetState) {
-            TypeSettings(
+    if (showType) {
+        ModalBottomSheet(
+            onDismissRequest = { showType = false },
+            sheetState = sheetState,
+        ) {
+            TypeSheet(
                 fontSize = fontSize,
                 lineHeight = lineHeight,
-                onFontSize = vm::updateFontSize,
-                onLineHeight = vm::updateLineHeight,
+                onFontSize = vm::changeFontSize,
+                onLineHeight = vm::changeLineHeight,
             )
         }
     }
 }
 
 @Composable
-private fun NovelCatalog(
-    chapters: List<me.rerere.rikkahub.data.db.entity.NovelChapterEntity>,
+private fun CatalogSheet(
+    chapters: List<NovelChapter>,
     current: Int,
     onSelect: (Int) -> Unit,
 ) {
@@ -230,7 +223,7 @@ private fun NovelCatalog(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
         )
         LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
-            items(chapters, key = { it.id }) { chapter ->
+            items(chapters, key = { it.ordinal }) { chapter ->
                 val selected = chapter.ordinal == current
                 Surface(
                     onClick = { onSelect(chapter.ordinal) },
@@ -253,17 +246,17 @@ private fun NovelCatalog(
 }
 
 @Composable
-private fun TypeSettings(
+private fun TypeSheet(
     fontSize: Int,
     lineHeight: Float,
     onFontSize: (Int) -> Unit,
     onLineHeight: (Float) -> Unit,
 ) {
     var size by remember { mutableIntStateOf(fontSize) }
-    var spacing by remember { mutableStateOf(lineHeight) }
+    var spacing by remember { mutableFloatStateOf(lineHeight) }
     Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text("排版", style = MaterialTheme.typography.titleMedium)
-        Text("字号 ${size}", style = MaterialTheme.typography.labelMedium)
+        Text("字号 $size", style = MaterialTheme.typography.labelMedium)
         Slider(
             value = size.toFloat(),
             onValueChange = { size = it.toInt(); onFontSize(it.toInt()) },

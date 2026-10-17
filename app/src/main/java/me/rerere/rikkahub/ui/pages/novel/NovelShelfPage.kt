@@ -1,8 +1,11 @@
 package me.rerere.rikkahub.ui.pages.novel
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,8 +21,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -31,15 +32,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import me.rerere.hugeicons.HugeIcons
 import me.rerere.hugeicons.stroke.Add01
-import me.rerere.rikkahub.data.db.entity.NovelEntity
+import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.data.novel.NovelMeta
 import me.rerere.rikkahub.ui.components.nav.BackButton
-import me.rerere.rikkahub.ui.theme.CustomColors
 import me.rerere.rikkahub.ui.context.LocalNavController
 import me.rerere.rikkahub.ui.context.LocalToaster
-import me.rerere.rikkahub.Screen
+import me.rerere.rikkahub.ui.theme.CustomColors
 import org.koin.androidx.compose.koinViewModel
 
-/** 书架：列出已导入的小说与进度，点击继续阅读。 */
+/** 书架：展示已导入小说与阅读进度，沿用聊天页的顶栏与卡片样式。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NovelShelfPage(vm: NovelShelfVM = koinViewModel()) {
@@ -47,10 +48,11 @@ fun NovelShelfPage(vm: NovelShelfVM = koinViewModel()) {
     val toaster = LocalToaster.current
     val novels by vm.novels.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             scope.launch {
-                vm.importFile(uri)
+                vm.import(uri)
                     .onSuccess { toaster.show("已导入《${it.title}》") }
                     .onFailure { toaster.show("导入失败：${it.message}") }
             }
@@ -63,9 +65,7 @@ fun NovelShelfPage(vm: NovelShelfVM = koinViewModel()) {
                 title = { Text("书架") },
                 navigationIcon = { BackButton() },
                 actions = {
-                    IconButton(
-                        onClick = { picker.launch(arrayOf("text/plain", "text/*")) }
-                    ) {
+                    IconButton(onClick = { picker.launch(arrayOf("text/plain", "text/*")) }) {
                         Icon(HugeIcons.Add01, contentDescription = "导入小说")
                     }
                 },
@@ -89,14 +89,11 @@ fun NovelShelfPage(vm: NovelShelfVM = koinViewModel()) {
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
+                contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(novels, key = { it.id }) { novel ->
-                    NovelRow(
-                        novel = novel,
-                        onClick = { navController.navigate(Screen.NovelReader(novel.id)) },
-                    )
+                    NovelRow(novel) { navController.navigate(Screen.NovelReader(novel.id)) }
                 }
             }
         }
@@ -104,7 +101,7 @@ fun NovelShelfPage(vm: NovelShelfVM = koinViewModel()) {
 }
 
 @Composable
-private fun NovelRow(novel: NovelEntity, onClick: () -> Unit) {
+private fun NovelRow(novel: NovelMeta, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape = MaterialTheme.shapes.large,

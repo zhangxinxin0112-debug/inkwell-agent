@@ -29,7 +29,7 @@ import org.koin.dsl.module
 
 val viewModelModule = module {
     viewModel<NovelReaderVM> { params ->
-        NovelReaderVM(params.get(), get(), get())
+        NovelReaderVM(params.get(), get())
     }
     viewModel {
         NovelShelfVM(get(), androidContext())
